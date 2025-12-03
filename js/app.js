@@ -357,7 +357,7 @@ createApp({
         },
         
         // 新增交易
-        addTransaction() {
+        async addTransaction() {
             if (!this.currentUser) {
                 this.showErrorMessage('請先登入');
                 return;
@@ -369,13 +369,22 @@ createApp({
                 total: this.newTransaction.quantity * this.newTransaction.price
             };
             
+            // 先更新本地資料
             this.transactions.unshift(transaction);
             this.updateHoldings(transaction);
-            this.syncWithGoogleSheets();
             
+            // 關閉彈窗並顯示成功訊息
             this.showAddTransactionModal = false;
             this.resetNewTransaction();
             this.showSuccessMessage('交易紀錄新增成功');
+            
+            // 即時增量同步到 Google Sheets
+            if (this.settings.googleSheetsUrl) {
+                await this.syncSingleTransaction(transaction, 'add');
+            } else {
+                // 備用：完整同步
+                this.syncWithGoogleSheets();
+            }
         },
         
         // 更新持股
@@ -461,13 +470,24 @@ createApp({
         },
         
         // 刪除交易
-        deleteTransaction(id) {
+        async deleteTransaction(id) {
             if (confirm('確定要刪除這筆交易嗎？')) {
                 const index = this.transactions.findIndex(t => t.id === id);
                 if (index > -1) {
+                    // 先保存要刪除的交易資料
+                    const transactionToDelete = { ...this.transactions[index] };
+                    
+                    // 從本地資料中移除
                     this.transactions.splice(index, 1);
-                    this.syncWithGoogleSheets();
                     this.showSuccessMessage('交易紀錄已刪除');
+                    
+                    // 即時增量同步到 Google Sheets
+                    if (this.settings.googleSheetsUrl) {
+                        await this.syncSingleTransaction(transactionToDelete, 'delete');
+                    } else {
+                        // 備用：完整同步
+                        this.syncWithGoogleSheets();
+                    }
                 }
             }
         },
@@ -571,15 +591,41 @@ createApp({
                 return;
             }
             
+            this.isLoading = true;
+            
             try {
-                const response = await fetch(this.settings.googleSheetsUrl + '?action=test');
+                const url = this.settings.googleSheetsUrl + '?action=test';
+                console.log('Testing connection to:', url);
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    mode: 'cors',
+                    credentials: 'omit',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('Response status:', response.status);
+                
                 if (response.ok) {
-                    this.showSuccessMessage('Google Sheets 連線測試成功');
+                    const data = await response.json();
+                    console.log('Test response:', data);
+                    
+                    if (data.status === 'success') {
+                        this.showSuccessMessage('Google Sheets 連線測試成功！');
+                    } else {
+                        this.showErrorMessage('Google Sheets 回應錯誤: ' + (data.message || '未知錯誤'));
+                    }
                 } else {
-                    this.showErrorMessage('Google Sheets 連線測試失敗');
+                    this.showErrorMessage(`HTTP 錯誤 ${response.status}: ${response.statusText}`);
                 }
             } catch (error) {
-                this.showErrorMessage('Google Sheets 連線測試失敗: ' + error.message);
+                console.error('Connection test error:', error);
+                this.showErrorMessage('連線測試失敗: ' + error.message + '\n請檢查 Web App URL 是否正確，並確認已設定為「任何人」可存取');
+            } finally {
+                this.isLoading = false;
             }
         },
         
@@ -1297,6 +1343,107 @@ createApp({
                 }
             };
             reader.readAsText(file);
+        },
+        
+        // 單一交易增量同步到 Google Sheets
+        async syncSingleTransaction(transaction, action) {
+            if (!this.settings.googleSheetsUrl || !this.currentUser) {
+                console.log('Skip sync: no URL or user');
+                return;
+            }
+            
+            try {
+                const payload = {
+                    action: 'updateTransaction',
+                    userId: this.currentUser.userId,
+                    transaction: transaction,
+                    operation: action, // 'add' or 'delete'
+                    timestamp: new Date().toISOString()
+                };
+                
+                console.log('Syncing single transaction:', payload);
+                
+                const response = await fetch(this.settings.googleSheetsUrl, {
+                    method: 'POST',
+                    mode: 'cors',
+                    credentials: 'omit',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('Sync result:', result);
+                    
+                    if (result.status === 'success') {
+                        console.log(`交易 ${action} 同步成功`);
+                        // 不顯示成功訊息，避免過多通知
+                    } else {
+                        console.warn('同步回應異常:', result.message);
+                    }
+                } else {
+                    console.error('同步請求失敗:', response.status, response.statusText);
+                    // 靜默失敗，不影響用戶體驗
+                }
+                
+            } catch (error) {
+                console.error('交易同步錯誤:', error);
+                // 靜默失敗，不影響用戶體驗
+            }
+        },
+        
+        // 增強版完整同步功能
+        async syncToGoogleSheetsComplete() {
+            if (!this.settings.googleSheetsUrl || !this.currentUser) {
+                return;
+            }
+            
+            this.isLoading = true;
+            
+            try {
+                const payload = {
+                    action: 'sync',
+                    userId: this.currentUser.userId,
+                    holdings: this.holdings || [],
+                    transactions: this.transactions || [],
+                    timestamp: new Date().toISOString()
+                };
+                
+                console.log('Performing complete sync:', payload);
+                
+                const response = await fetch(this.settings.googleSheetsUrl, {
+                    method: 'POST',
+                    mode: 'cors',
+                    credentials: 'omit',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('Complete sync result:', result);
+                    
+                    if (result.status === 'success') {
+                        this.showSuccessMessage('資料已完整同步到 Google Sheets');
+                    } else {
+                        this.showErrorMessage('同步失敗: ' + (result.message || '未知錯誤'));
+                    }
+                } else {
+                    this.showErrorMessage(`同步失敗: HTTP ${response.status}`);
+                }
+                
+            } catch (error) {
+                console.error('Complete sync error:', error);
+                this.showErrorMessage('同步失敗: ' + error.message);
+            } finally {
+                this.isLoading = false;
+            }
         }
     },
     
