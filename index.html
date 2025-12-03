@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>個人投資組合管理系統</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Vue.js 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/styles.css">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#1f2937',
+                        secondary: '#374151',
+                        accent: '#3b82f6',
+                        success: '#10b981',
+                        danger: '#ef4444',
+                        warning: '#f59e0b'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50">
+    <div id="app">
+        <!-- Loading Spinner -->
+        <div v-if="isLoading" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white p-6 rounded-lg shadow-lg text-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-accent mx-auto mb-4"></div>
+                <p class="text-gray-700">載入中...</p>
+            </div>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="bg-white shadow-lg sticky top-0 z-40">
+            <div class="container mx-auto px-4">
+                <div class="flex justify-between items-center h-16">
+                    <div class="flex items-center space-x-4">
+                        <i class="fas fa-chart-line text-accent text-2xl"></i>
+                        <h1 class="text-xl font-bold text-primary">投資組合管理</h1>
+                    </div>
+                    
+                    <div class="hidden md:flex space-x-6">
+                        <button @click="currentPage = 'home'" 
+                                :class="currentPage === 'home' ? 'text-accent border-b-2 border-accent' : 'text-gray-700 hover:text-accent'"
+                                class="px-3 py-2 font-medium transition-colors">
+                            <i class="fas fa-home mr-2"></i>首頁
+                        </button>
+                        <button @click="currentPage = 'transactions'" 
+                                :class="currentPage === 'transactions' ? 'text-accent border-b-2 border-accent' : 'text-gray-700 hover:text-accent'"
+                                class="px-3 py-2 font-medium transition-colors">
+                            <i class="fas fa-exchange-alt mr-2"></i>交易紀錄
+                        </button>
+                        <button @click="currentPage = 'allocation'" 
+                                :class="currentPage === 'allocation' ? 'text-accent border-b-2 border-accent' : 'text-gray-700 hover:text-accent'"
+                                class="px-3 py-2 font-medium transition-colors">
+                            <i class="fas fa-pie-chart mr-2"></i>資產配置
+                        </button>
+                        <button @click="currentPage = 'settings'" 
+                                :class="currentPage === 'settings' ? 'text-accent border-b-2 border-accent' : 'text-gray-700 hover:text-accent'"
+                                class="px-3 py-2 font-medium transition-colors">
+                            <i class="fas fa-cog mr-2"></i>設定
+                        </button>
+                    </div>
+
+                    <!-- Currency Selector -->
+                    <div class="flex items-center space-x-4">
+                        <!-- User Info -->
+                        <div v-if="currentUser" class="flex items-center space-x-2 text-sm">
+                            <i class="fas fa-user text-gray-600"></i>
+                            <span class="text-gray-700">{{ currentUser.username }}</span>
+                            <button @click="showUserMenu = !showUserMenu" class="text-gray-600 hover:text-accent">
+                                <i class="fas fa-chevron-down"></i>
+                            </button>
+                            <!-- User Dropdown -->
+                            <div v-if="showUserMenu" class="absolute top-12 right-0 bg-white rounded-lg shadow-lg py-2 z-50">
+                                <button @click="exportUserData" class="block w-full text-left px-4 py-2 hover:bg-gray-100">
+                                    <i class="fas fa-download mr-2"></i>匯出資料
+                                </button>
+                                <button @click="showImportModal = true; showUserMenu = false" class="block w-full text-left px-4 py-2 hover:bg-gray-100">
+                                    <i class="fas fa-upload mr-2"></i>匯入資料
+                                </button>
+                                <hr class="my-1">
+                                <button @click="logout" class="block w-full text-left px-4 py-2 hover:bg-gray-100 text-danger">
+                                    <i class="fas fa-sign-out-alt mr-2"></i>登出
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <select v-model="selectedCurrency" @change="updateCurrency" 
+                                class="px-3 py-1 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-accent">
+                            <option value="TWD">TWD</option>
+                            <option value="USD">USD</option>
+                            <option value="USDT">USDT</option>
+                            <option value="ALL">全部</option>
+                        </select>
+                        
+                        <button @click="refreshData" class="text-gray-700 hover:text-accent transition-colors">
+                            <i class="fas fa-sync-alt" :class="{'animate-spin': isRefreshing}"></i>
+                        </button>
+                    </div>
+
+                    <!-- Mobile menu button -->
+                    <button @click="mobileMenuOpen = !mobileMenuOpen" class="md:hidden">
+                        <i class="fas fa-bars text-xl"></i>
+                    </button>
+                </div>
+
+                <!-- Mobile menu -->
+                <div v-if="mobileMenuOpen" class="md:hidden pb-4 pt-2">
+                    <button @click="currentPage = 'home'; mobileMenuOpen = false" 
+                            :class="currentPage === 'home' ? 'text-accent' : 'text-gray-700'"
+                            class="block w-full text-left px-3 py-2 hover:bg-gray-100">
+                        <i class="fas fa-home mr-2"></i>首頁
+                    </button>
+                    <button @click="currentPage = 'transactions'; mobileMenuOpen = false" 
+                            :class="currentPage === 'transactions' ? 'text-accent' : 'text-gray-700'"
+                            class="block w-full text-left px-3 py-2 hover:bg-gray-100">
+                        <i class="fas fa-exchange-alt mr-2"></i>交易紀錄
+                    </button>
+                    <button @click="currentPage = 'allocation'; mobileMenuOpen = false" 
+                            :class="currentPage === 'allocation' ? 'text-accent' : 'text-gray-700'"
+                            class="block w-full text-left px-3 py-2 hover:bg-gray-100">
+                        <i class="fas fa-pie-chart mr-2"></i>資產配置
+                    </button>
+                    <button @click="currentPage = 'settings'; mobileMenuOpen = false" 
+                            :class="currentPage === 'settings' ? 'text-accent' : 'text-gray-700'"
+                            class="block w-full text-left px-3 py-2 hover:bg-gray-100">
+                        <i class="fas fa-cog mr-2"></i>設定
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="container mx-auto px-4 py-6">
+            <!-- Home Page -->
+            <div v-if="currentPage === 'home'">
+                <!-- Portfolio Summary Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-600">總資產</p>
+                                <p class="text-2xl font-bold text-primary">{{ formatCurrency(totalAssets) }}</p>
+                            </div>
+                            <div class="bg-accent bg-opacity-10 p-3 rounded-full">
+                                <i class="fas fa-wallet text-accent text-xl"></i>
+                            </div>
+                        </div>
+                        <div class="mt-4 flex items-center">
+                            <span :class="totalReturn >= 0 ? 'text-success' : 'text-danger'" class="text-sm font-medium">
+                                {{ totalReturn >= 0 ? '+' : '' }}{{ (totalReturn * 100).toFixed(2) }}%
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-600">未實現損益</p>
+                                <p class="text-2xl font-bold" :class="unrealizedPnL >= 0 ? 'text-success' : 'text-danger'">
+                                    {{ formatCurrency(unrealizedPnL) }}
+                                </p>
+                            </div>
+                            <div class="bg-opacity-10 p-3 rounded-full" :class="unrealizedPnL >= 0 ? 'bg-success' : 'bg-danger'">
+                                <i class="fas fa-chart-line text-xl" :class="unrealizedPnL >= 0 ? 'text-success' : 'text-danger'"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-600">股票資產</p>
+                                <p class="text-2xl font-bold text-primary">{{ formatCurrency(stockAssets) }}</p>
+                            </div>
+                            <div class="bg-blue-500 bg-opacity-10 p-3 rounded-full">
+                                <i class="fas fa-chart-bar text-blue-500 text-xl"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-600">加密貨幣資產</p>
+                                <p class="text-2xl font-bold text-primary">{{ formatCurrency(cryptoAssets) }}</p>
+                            </div>
+                            <div class="bg-yellow-500 bg-opacity-10 p-3 rounded-full">
+                                <i class="fab fa-bitcoin text-yellow-500 text-xl"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Section -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                    <!-- Asset Allocation Pie Chart -->
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-xl font-semibold text-primary">資產分佈</h2>
+                            <div class="flex space-x-2">
+                                <button @click="pieChartType = 'category'" 
+                                        :class="pieChartType === 'category' ? 'bg-accent text-white' : 'bg-gray-200 text-gray-700'"
+                                        class="px-3 py-1 text-sm rounded-md">類型</button>
+                                <button @click="pieChartType = 'currency'" 
+                                        :class="pieChartType === 'currency' ? 'bg-accent text-white' : 'bg-gray-200 text-gray-700'"
+                                        class="px-3 py-1 text-sm rounded-md">幣種</button>
+                            </div>
+                        </div>
+                        <canvas id="pieChart" width="400" height="300"></canvas>
+                    </div>
+
+                    <!-- Portfolio Timeline -->
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-xl font-semibold text-primary">總資產趨勢</h2>
+                            <div class="flex space-x-2">
+                                <button @click="timeRange = '7D'" 
+                                        :class="timeRange === '7D' ? 'bg-accent text-white' : 'bg-gray-200 text-gray-700'"
+                                        class="px-3 py-1 text-sm rounded-md">7日</button>
+                                <button @click="timeRange = '30D'" 
+                                        :class="timeRange === '30D' ? 'bg-accent text-white' : 'bg-gray-200 text-gray-700'"
+                                        class="px-3 py-1 text-sm rounded-md">30日</button>
+                                <button @click="timeRange = '90D'" 
+                                        :class="timeRange === '90D' ? 'bg-accent text-white' : 'bg-gray-200 text-gray-700'"
+                                        class="px-3 py-1 text-sm rounded-md">90日</button>
+                                <button @click="timeRange = '1Y'" 
+                                        :class="timeRange === '1Y' ? 'bg-accent text-white' : 'bg-gray-200 text-gray-700'"
+                                        class="px-3 py-1 text-sm rounded-md">1年</button>
+                            </div>
+                        </div>
+                        <canvas id="lineChart" width="400" height="300"></canvas>
+                    </div>
+                </div>
+
+                <!-- Holdings Table -->
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-xl font-semibold text-primary">持股明細</h2>
+                            <div class="flex items-center space-x-4">
+                                <!-- Search -->
+                                <div class="relative">
+                                    <input v-model="searchKeyword" type="text" placeholder="搜尋股票代碼或名稱" 
+                                           class="pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                                    <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                                </div>
+                                
+                                <!-- Filter -->
+                                <select v-model="filterCategory" 
+                                        class="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                                    <option value="">全部</option>
+                                    <option value="台股">台股</option>
+                                    <option value="美股">美股</option>
+                                    <option value="加密貨幣">加密貨幣</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">股票</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">持有數量</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">平均成本</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">現價</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">市值</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">損益</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">損益率</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <tr v-for="holding in filteredHoldings" :key="holding.symbol" class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <div class="flex items-center">
+                                            <div class="flex-shrink-0 h-10 w-10">
+                                                <div class="h-10 w-10 rounded-full bg-accent bg-opacity-10 flex items-center justify-center">
+                                                    <span class="text-sm font-medium text-accent">{{ holding.symbol.substring(0,2) }}</span>
+                                                </div>
+                                            </div>
+                                            <div class="ml-4">
+                                                <div class="text-sm font-medium text-gray-900">{{ holding.symbol }}</div>
+                                                <div class="text-sm text-gray-500">{{ holding.name }}</div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ holding.quantity.toLocaleString() }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ formatCurrency(holding.avgCost) }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ formatCurrency(holding.currentPrice) }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ formatCurrency(holding.marketValue) }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm" :class="holding.unrealizedPnL >= 0 ? 'text-success' : 'text-danger'">
+                                        {{ formatCurrency(holding.unrealizedPnL) }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm" :class="holding.returnRate >= 0 ? 'text-success' : 'text-danger'">
+                                        {{ (holding.returnRate * 100).toFixed(2) }}%
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Transactions Page -->
+            <div v-if="currentPage === 'transactions'">
+                <div class="flex items-center justify-between mb-6">
+                    <h1 class="text-2xl font-bold text-primary">交易紀錄</h1>
+                    <button @click="showAddTransactionModal = true" 
+                            class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">
+                        <i class="fas fa-plus mr-2"></i>新增交易
+                    </button>
+                </div>
+
+                <!-- Filters -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">日期範圍</label>
+                            <div class="flex space-x-2">
+                                <input v-model="transactionDateFrom" type="date" 
+                                       class="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                                <input v-model="transactionDateTo" type="date" 
+                                       class="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">交易類型</label>
+                            <select v-model="transactionTypeFilter" 
+                                    class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                                <option value="">全部</option>
+                                <option value="buy">買入</option>
+                                <option value="sell">賣出</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">市場</label>
+                            <select v-model="transactionMarketFilter" 
+                                    class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                                <option value="">全部</option>
+                                <option value="台股">台股</option>
+                                <option value="美股">美股</option>
+                                <option value="加密貨幣">加密貨幣</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">搜尋</label>
+                            <input v-model="transactionSearchKeyword" type="text" placeholder="搜尋股票代碼" 
+                                   class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transactions Table -->
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日期</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">類型</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">股票</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">數量</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">價格</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">總金額</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">來源</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <tr v-for="transaction in filteredTransactions" :key="transaction.id" class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ formatDate(transaction.date) }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span :class="transaction.type === 'buy' ? 'bg-success' : 'bg-danger'" 
+                                              class="px-2 py-1 text-xs rounded-full text-white">
+                                            {{ transaction.type === 'buy' ? '買入' : '賣出' }}
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ transaction.symbol }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ transaction.quantity.toLocaleString() }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ formatCurrency(transaction.price) }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ formatCurrency(transaction.total) }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ transaction.source }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                        <button @click="editTransaction(transaction)" class="text-accent hover:text-blue-600 mr-3">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button @click="deleteTransaction(transaction.id)" class="text-danger hover:text-red-600">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Allocation Page -->
+            <div v-if="currentPage === 'allocation'">
+                <h1 class="text-2xl font-bold text-primary mb-6">資產配置分析</h1>
+                
+                <!-- AI Analysis Section -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6" v-if="portfolioAnalysis">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold text-primary">AI 投資組合分析</h2>
+                        <div class="flex items-center space-x-2">
+                            <div class="text-2xl font-bold" :class="portfolioAnalysis.score >= 80 ? 'text-success' : portfolioAnalysis.score >= 60 ? 'text-warning' : 'text-danger'">
+                                {{ portfolioAnalysis.score }}
+                            </div>
+                            <span class="text-sm text-gray-500">分</span>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div>
+                            <h3 class="font-semibold text-gray-800 mb-2">整體評估</h3>
+                            <p class="text-gray-600 text-sm mb-4">{{ portfolioAnalysis.overallAssessment }}</p>
+                            
+                            <h3 class="font-semibold text-gray-800 mb-2">資產配置建議</h3>
+                            <p class="text-gray-600 text-sm mb-4">{{ portfolioAnalysis.allocationAdvice }}</p>
+                        </div>
+                        
+                        <div>
+                            <h3 class="font-semibold text-gray-800 mb-2">風險評估</h3>
+                            <p class="text-gray-600 text-sm mb-4">{{ portfolioAnalysis.riskAssessment }}</p>
+                            
+                            <h3 class="font-semibold text-gray-800 mb-2">投資建議</h3>
+                            <ul class="list-disc list-inside text-sm text-gray-600">
+                                <li v-for="rec in portfolioAnalysis.recommendations" :key="rec" class="mb-1">{{ rec }}</li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 flex justify-end">
+                        <button @click="analyzePortfolio" :disabled="isAnalyzing" 
+                                class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors disabled:bg-gray-400">
+                            <i class="fas fa-brain mr-2"></i>
+                            <span v-if="isAnalyzing">分析中...</span>
+                            <span v-else>重新分析</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Allocation Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <h3 class="text-lg font-semibold text-primary mb-4">股票 vs 加密貨幣</h3>
+                        <canvas id="stockCryptoChart" width="300" height="200"></canvas>
+                    </div>
+                    
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <h3 class="text-lg font-semibold text-primary mb-4">幣種分佈</h3>
+                        <canvas id="currencyChart" width="300" height="200"></canvas>
+                    </div>
+                    
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <h3 class="text-lg font-semibold text-primary mb-4">產業分佈</h3>
+                        <canvas id="sectorChart" width="300" height="200"></canvas>
+                    </div>
+                </div>
+
+                <!-- Detailed Allocation Table -->
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h2 class="text-xl font-semibold text-primary">詳細配置</h2>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">資產</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">市值</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">佔比</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">損益</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">類型</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <tr v-for="allocation in allocationData" :key="allocation.symbol" class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                        {{ allocation.symbol }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ formatCurrency(allocation.marketValue) }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ (allocation.percentage * 100).toFixed(2) }}%
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm" :class="allocation.pnl >= 0 ? 'text-success' : 'text-danger'">
+                                        {{ formatCurrency(allocation.pnl) }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span class="px-2 py-1 text-xs rounded-full" 
+                                              :class="allocation.type === '股票' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'">
+                                            {{ allocation.type }}
+                                        </span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div v-if="currentPage === 'settings'">
+                <h1 class="text-2xl font-bold text-primary mb-6">系統設定</h1>
+                
+                <div class="space-y-6">
+                    <!-- Google Sheets Configuration -->
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <h2 class="text-xl font-semibold text-primary mb-4">Google Sheets 配置</h2>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Google Apps Script URL</label>
+                                <input v-model="settings.googleSheetsUrl" type="url" 
+                                       class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent" 
+                                       placeholder="https://script.google.com/macros/s/.../exec">
+                            </div>
+                            <button @click="testGoogleSheetsConnection" 
+                                    class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">
+                                <i class="fas fa-check mr-2"></i>測試連線
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- API Keys Configuration -->
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <h2 class="text-xl font-semibold text-primary mb-4">API 金鑰配置</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Alpha Vantage API Key (美股)</label>
+                                <input v-model="settings.alphaVantageKey" type="password" 
+                                       class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent" 
+                                       placeholder="輸入 Alpha Vantage API Key">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">CoinGecko API Key (加密貨幣)</label>
+                                <input v-model="settings.coinGeckoKey" type="password" 
+                                       class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent" 
+                                       placeholder="輸入 CoinGecko API Key">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">ExchangeRate API Key (匯率)</label>
+                                <input v-model="settings.exchangeRateKey" type="password" 
+                                       class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent" 
+                                       placeholder="輸入 ExchangeRate API Key">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">OpenAI API Key (AI 分析)</label>
+                                <input v-model="settings.openaiKey" type="password" 
+                                       class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent" 
+                                       placeholder="輸入 OpenAI API Key">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- General Settings -->
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <h2 class="text-xl font-semibold text-primary mb-4">一般設定</h2>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">預設幣別</label>
+                                <select v-model="settings.defaultCurrency" 
+                                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                                    <option value="TWD">台幣 (TWD)</option>
+                                    <option value="USD">美元 (USD)</option>
+                                    <option value="USDT">USDT</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">成本計算方式</label>
+                                <select v-model="settings.costMethod" 
+                                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                                    <option value="FIFO">先進先出 (FIFO)</option>
+                                    <option value="LIFO">後進先出 (LIFO)</option>
+                                    <option value="WEIGHTED">加權平均</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center">
+                                <input v-model="settings.autoRefresh" type="checkbox" 
+                                       class="h-4 w-4 text-accent focus:ring-accent border-gray-300 rounded">
+                                <label class="ml-2 block text-sm text-gray-700">
+                                    自動更新價格 (每5分鐘)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Save Button -->
+                    <div class="flex justify-end">
+                        <button @click="saveSettings" 
+                                class="bg-success text-white px-6 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                            <i class="fas fa-save mr-2"></i>儲存設定
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Add Transaction Modal -->
+        <div v-if="showAddTransactionModal" 
+             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+             @click="showAddTransactionModal = false">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4" @click.stop>
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold text-primary">新增交易紀錄</h3>
+                    <button @click="showAddTransactionModal = false" class="text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <form @submit.prevent="addTransaction" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">交易類型</label>
+                        <select v-model="newTransaction.type" required
+                                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                            <option value="buy">買入</option>
+                            <option value="sell">賣出</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">股票代碼</label>
+                        <input v-model="newTransaction.symbol" type="text" required
+                               class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+                               placeholder="例如：2330, AAPL, BTC">
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">數量</label>
+                            <input v-model.number="newTransaction.quantity" type="number" step="any" required
+                                   class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">價格</label>
+                            <input v-model.number="newTransaction.price" type="number" step="any" required
+                                   class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">交易日期</label>
+                        <input v-model="newTransaction.date" type="date" required
+                               class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">來源</label>
+                        <select v-model="newTransaction.source"
+                                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                            <option value="證券商">證券商</option>
+                            <option value="Binance">Binance</option>
+                            <option value="Pionex">Pionex</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">備註</label>
+                        <textarea v-model="newTransaction.notes" rows="3"
+                                  class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+                                  placeholder="選填"></textarea>
+                    </div>
+                    
+                    <div class="flex justify-end space-x-3 pt-4">
+                        <button type="button" @click="showAddTransactionModal = false"
+                                class="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors">
+                            取消
+                        </button>
+                        <button type="submit"
+                                class="px-4 py-2 bg-accent text-white rounded-lg hover:bg-blue-600 transition-colors">
+                            新增
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Login/Register Modal -->
+        <div v-if="!currentUser" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-md mx-4">
+                <div class="text-center mb-6">
+                    <i class="fas fa-chart-line text-accent text-4xl mb-4"></i>
+                    <h2 class="text-2xl font-bold text-primary">投資組合管理系統</h2>
+                    <p class="text-gray-600 mt-2">請登入或註冊以開始使用</p>
+                </div>
+                
+                <div class="flex mb-6">
+                    <button @click="authMode = 'login'" 
+                            :class="authMode === 'login' ? 'bg-accent text-white' : 'bg-gray-200 text-gray-700'"
+                            class="flex-1 py-2 px-4 rounded-l-lg transition-colors">
+                        登入
+                    </button>
+                    <button @click="authMode = 'register'" 
+                            :class="authMode === 'register' ? 'bg-accent text-white' : 'bg-gray-200 text-gray-700'"
+                            class="flex-1 py-2 px-4 rounded-r-lg transition-colors">
+                        註冊
+                    </button>
+                </div>
+                
+                <form @submit.prevent="authMode === 'login' ? login() : register()" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">用戶名稱</label>
+                        <input v-model="authForm.username" type="text" required
+                               class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+                               placeholder="請輸入用戶名稱">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">密碼</label>
+                        <input v-model="authForm.password" type="password" required
+                               class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+                               placeholder="請輸入密碼">
+                    </div>
+                    
+                    <div v-if="authMode === 'register'">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">確認密碼</label>
+                        <input v-model="authForm.confirmPassword" type="password" required
+                               class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+                               placeholder="請再次輸入密碼">
+                    </div>
+                    
+                    <button type="submit" :disabled="isAuthenticating"
+                            class="w-full bg-accent text-white py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors disabled:bg-gray-400">
+                        <span v-if="isAuthenticating">處理中...</span>
+                        <span v-else>{{ authMode === 'login' ? '登入' : '註冊' }}</span>
+                    </button>
+                </form>
+                
+                <div class="mt-6 text-center text-sm text-gray-600">
+                    <p class="mb-2">💡 小提示：</p>
+                    <p>• 每個用戶都有獨立的資料空間</p>
+                    <p>• 請妥善保管您的用戶名稱和密碼</p>
+                    <p>• 系統會將資料儲存在您的瀏覽器中</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Import Data Modal -->
+        <div v-if="showImportModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+             @click="showImportModal = false">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4" @click.stop>
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold text-primary">匯入用戶資料</h3>
+                    <button @click="showImportModal = false" class="text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">選擇備份檔案</label>
+                        <input type="file" accept=".json" @change="handleImportFile" 
+                               class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent">
+                    </div>
+                    
+                    <div class="flex justify-end space-x-3 pt-4">
+                        <button @click="showImportModal = false"
+                                class="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors">
+                            取消
+                        </button>
+                        <button @click="importUserData" :disabled="!importFileData"
+                                class="px-4 py-2 bg-accent text-white rounded-lg hover:bg-blue-600 transition-colors disabled:bg-gray-400">
+                            匯入
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Success/Error Messages -->
+        <div v-if="showMessage" 
+             :class="messageType === 'success' ? 'bg-success' : 'bg-danger'"
+             class="fixed top-20 right-4 text-white px-6 py-3 rounded-lg shadow-lg z-50">
+            <div class="flex items-center">
+                <i :class="messageType === 'success' ? 'fas fa-check' : 'fas fa-exclamation-triangle'" 
+                   class="mr-2"></i>
+                {{ message }}
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Files -->
+    <script src="js/user-manager.js"></script>
+    <script src="js/price-api.js"></script>
+    <script src="js/ai-analyzer.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
