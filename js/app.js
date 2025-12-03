@@ -475,34 +475,39 @@ createApp({
         // Google Sheets 同步
         async syncWithGoogleSheets() {
             if (!this.currentUser || !this.settings.googleSheetsUrl) {
+                // 儲存到本地作為備份
                 this.saveToLocalStorage();
                 return;
             }
-        
+            
             try {
-                await fetch(this.settings.googleSheetsUrl, {
-                    method: "POST",
-                    mode: "no-cors", // ★★★ 一定要這個 ★★★
+                // 發送資料到 Google Sheets
+                const response = await fetch(this.settings.googleSheetsUrl, {
+                    method: 'POST',
+                    mode: 'cors',
                     headers: {
-                        "Content-Type": "application/json"
+                        'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        action: "sync",
-                        userId: this.currentUser.id,
+                        action: 'sync',
+                        userId: this.currentUser.id, // 添加用戶 ID 以區分資料
                         holdings: this.holdings,
                         transactions: this.transactions
                     })
                 });
-        
-                // Apps Script 在 no-cors 下無法回傳 → 永遠進不到 response
-                this.saveToLocalStorage();  
-                console.log("Google Sheet Sync: SENT");
-            } catch (err) {
-                console.error("Google Sheet Sync Error:", err);
+                
+                if (!response.ok) {
+                    throw new Error('同步失敗');
+                }
+                
+                // 同時儲存到本地作為備份
+                this.saveToLocalStorage();
+            } catch (error) {
+                console.error('Google Sheets 同步錯誤:', error);
+                // 失敗時至少儲存到本地
                 this.saveToLocalStorage();
             }
-        }
-
+        },
         
         // 從 Google Sheets 讀取資料
         async loadFromGoogleSheets() {
@@ -1330,5 +1335,4 @@ createApp({
             this.initializeModules();
         }, { deep: true });
     }
-
 }).mount('#app');
